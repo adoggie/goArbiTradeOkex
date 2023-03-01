@@ -1,0 +1,7 @@
+{
+  "message": "create_order",
+  "data": {    "spot": "SOL-USDT,buy",
+    "swap": "SOL-USDT-SWAP,sell",
+    "amount": 30
+  }
+}

@@ -1,0 +1,196 @@
+[
+  {
+    "event": "sendOrder",
+    "taskId": "SOL-USDT_SOL-USDT-SWAP",
+    "req": "SOL-USDT,0#SOL-USDT-SWAP,1",
+    "start": "2023-02-28T21:09:01.903011+08:00",
+    "end": "0001-01-01T00:00:00Z",
+    "order": null,
+    "orbSpot": {
+      "asks": [
+        {
+          "DepthPrice": 22.353,
+          "Size": 2445.04563,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.354,
+          "Size": 3041.741534,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.355,
+          "Size": 2723.307667,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.356,
+          "Size": 3011.024137,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.357,
+          "Size": 2385.309598,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        }
+      ],
+      "bids": [
+        {
+          "DepthPrice": 22.347,
+          "Size": 2244.109039,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.346,
+          "Size": 2474.940959,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.345,
+          "Size": 2476.126154,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.344,
+          "Size": 3470.38107,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.343,
+          "Size": 2436.769164,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        }
+      ],
+      "checksum": "0",
+      "ts": {}
+    },
+    "orbSwap": {
+      "asks": [
+        {
+          "DepthPrice": 22.348,
+          "Size": 36271,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 2
+        },
+        {
+          "DepthPrice": 22.349,
+          "Size": 1595,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.35,
+          "Size": 28202,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.351,
+          "Size": 575,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.352,
+          "Size": 1333,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        }
+      ],
+      "bids": [
+        {
+          "DepthPrice": 22.347,
+          "Size": 31050,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 2
+        },
+        {
+          "DepthPrice": 22.346,
+          "Size": 36685,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 2
+        },
+        {
+          "DepthPrice": 22.345,
+          "Size": 32902,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 1
+        },
+        {
+          "DepthPrice": 22.344,
+          "Size": 33465,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 2
+        },
+        {
+          "DepthPrice": 22.343,
+          "Size": 34675,
+          "LiquidatedOrder": 0,
+          "OrderNumbers": 2
+        }
+      ],
+      "checksum": "0",
+      "ts": {}
+    },
+    "ReqPlaceOrder": {
+      "instId": "SOL-USDT",
+      "clOrdId": "1677589741903",
+      "sz": "0",
+      "px": "22.352",
+      "tdMode": "cross",
+      "side": "buy",
+      "posSide": "net",
+      "ordType": "market"
+    },
+    "SpotInstrument": {
+      "instId": "SOL-USDT",
+      "baseCcy": "SOL",
+      "quoteCcy": "USDT",
+      "tickSz": 0.001,
+      "lotSz": 0.000001,
+      "minSz": 0.01,
+      "lever": 5,
+      "instType": "SPOT",
+      "category": "1",
+      "listTime": {},
+      "expTime": {},
+      "state": "live"
+    },
+    "SwapInstrument": {
+      "instId": "SOL-USDT-SWAP",
+      "uly": "SOL-USDT",
+      "settleCcy": "USDT",
+      "ctValCcy": "SOL",
+      "ctVal": 0.1,
+      "ctMult": 1,
+      "tickSz": 0.001,
+      "lotSz": 1,
+      "minSz": 1,
+      "lever": 75,
+      "instType": "SWAP",
+      "category": "1",
+      "listTime": {},
+      "expTime": {},
+      "ctType": "linear",
+      "state": "live"
+    },
+    "OrderMgrConfigVars": {
+      "name": "order_manger",
+      "pending_price_offset": 1
+    },
+    "CancelOrder": {
+      "code": "0",
+      "data": null
+    }
+  }
+]
