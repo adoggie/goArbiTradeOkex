@@ -9,6 +9,7 @@ type (
 	BrokerEvent struct {
 		Reason string
 		Broker *Broker
+		Data   any
 	} // 网络断开连接
 	// WsNetDisconnected
 	// WsNetConnected

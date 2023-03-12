@@ -39,9 +39,10 @@ type BrokerConfigVars struct {
 	Id  string `json:"id,omitempty"`
 	Key string `json:"key"`
 
-	BookChannel string         `json:"bookChannel,omitempty"`
-	Underlyings []*SpotAndSwap `json:"underlyings,omitempty"`
-	ApiKey      *BrokerApiKey
+	BookChannel      string         `json:"bookChannel,omitempty"`
+	Underlyings      []*SpotAndSwap `json:"underlyings,omitempty"`
+	ApiKey           *BrokerApiKey
+	RetreatAllOrders bool `json:"retreat_all_orders"`
 }
 
 type BrokerSubscriber interface {
@@ -64,6 +65,8 @@ type OkexContext struct {
 	orbCh               chan *public.OrderBook // 订单簿
 	sucCh               chan *events2.Success
 	StructuredEventChan chan interface{}
+	RawEventChan        chan *events2.Basic
+	DoneChan            chan interface{}
 }
 
 type Broker struct {
@@ -142,10 +145,10 @@ func (b *Broker) onOrderBook(book *public.OrderBook) {
 }
 
 func (b *Broker) onOrderReturn(order *private.Order) {
-	b.GetLogger().Println("onOrderReturn..")
-	if data, e := json.Marshal(order); e == nil {
-		log.Println(string(data))
-	}
+	//b.GetLogger().Println("onOrderReturn..")
+	//if data, e := json.Marshal(order); e == nil {
+	//	log.Println(string(data))
+	//}
 	if len(order.Orders) == 0 {
 		b.GetLogger().Println("invalid OrderReturn message.")
 		return
@@ -235,11 +238,12 @@ func (b *Broker) initOkexContext() {
 
 	//sockCh := make(chan *websocket.CloseError)
 	b.okex.StructuredEventChan = make(chan interface{})
+	b.okex.RawEventChan = make(chan *events2.Basic)
+	b.okex.DoneChan = make(chan interface{})
 }
 
 func (b *Broker) Init(config *BrokerConfigVars) bool {
 	b.config = config
-
 	b.initOkexContext()
 	b.chEvent = make(chan *BrokerEvent)
 	b.chWsLost = make(chan *websocket.CloseError)
@@ -317,16 +321,27 @@ func (b *Broker) initOkexClient() *api.Client {
 	//client.Ws.SetChannels(b.okex.errChan, b.okex.subChan, b.okex.uSubChan, b.okex.loginCh, b.okex.sucCh)
 	//client.Ws.SocketCloseCh = b.chWsLost
 	client.Ws.StructuredEventChan = b.okex.StructuredEventChan
+	client.Ws.RawEventChan = b.okex.RawEventChan
+	client.Ws.DoneChan = b.okex.DoneChan
 
 	if err := b.InitInstruments(client); err != nil {
 		b.GetLogger().Println(err.Error())
 		return nil
 	}
+	b.GetLogger().Println("initOkexClient.. Okay!")
 	return client
 }
 
 func (b *Broker) prepare() {
+
 	b.reset()
+	if b.config.RetreatAllOrders {
+		client := b.initOkexClient()
+		if client == nil {
+			b.GetLogger().Fatalln("Broker.InitOkexClient Failed!")
+		}
+		_ = b.RetreatAllOrder(client)
+	}
 }
 
 func (b *Broker) Run(ctx context.Context) {
@@ -336,6 +351,7 @@ func (b *Broker) Run(ctx context.Context) {
 	}
 
 	timer := time.NewTicker(time.Second * 2)
+	b.onNetWsDisconnected()
 MAIN:
 	for {
 		select {
@@ -348,6 +364,7 @@ MAIN:
 		case <-timer.C: // 定时检查 连接断开，检查仓位是否水平
 			b.mtx.Lock()
 			if b.client == nil || b.client.Ws.ConnStatus[true] == nil || b.client.Ws.ConnStatus[false] == nil {
+				b.onNetWsDisconnected()
 				var client *api.Client
 				if client = b.initOkexClient(); client != nil {
 					// 检查两腿对齐
@@ -368,6 +385,10 @@ MAIN:
 					b.mtx.Unlock()
 					continue
 				}
+				if b.client != nil {
+					// 第二次连接需要等待一会儿
+					time.Sleep(time.Second * 10)
+				}
 				b.client = client
 			}
 			b.mtx.Unlock()
@@ -377,7 +398,7 @@ MAIN:
 				b.mtx.Lock()
 				b.client = nil
 				b.mtx.Unlock()
-				b.onBrokerEvent(ev)
+				//b.onBrokerEvent(ev)
 			}
 		case orb := <-b.okex.orbCh: // 订单簿
 			b.onOrderBook(orb)
@@ -386,10 +407,20 @@ MAIN:
 		case e := <-b.okex.StructuredEventChan:
 			//log.Printf("[Event] STRUCTED:\t%+v", e)
 			_ = e
+		case e := <-b.okex.RawEventChan:
+			_ = e
+
+		case e := <-b.okex.DoneChan:
+			_ = e
 		case e := <-b.okex.errChan:
 			b.GetLogger().Println("onError return ..")
 			if data, e := json.Marshal(e); e == nil {
 				log.Println(string(data))
+			}
+			if e.Op == "order" {
+				//报单发送返回
+				e := &BrokerEvent{Reason: "orderError", Data: e.ID}
+				b.onBrokerEvent(e)
 			}
 		}
 	}
@@ -410,7 +441,11 @@ func (b *Broker) reset() {
 }
 
 func (b *Broker) onNetWsDisconnected() {
-	b.chEvent <- &BrokerEvent{Reason: "WsNetDisconnected"}
+	//b.chEvent <- &BrokerEvent{Reason: "WsNetDisconnected"}
+	for _, user := range b.users {
+		user.OnBrokerEvent(&BrokerEvent{Reason: "WsNetDisconnected"})
+	}
+
 }
 
 // SetLeverage 设置杠杆
@@ -425,10 +460,72 @@ func (b *Broker) GetCommission(instId string) (take, make float64) {
 	return
 }
 
+//func (b *Broker) RetreatOrderWithInstId(instId string) (err error) {
+//	req := []trade.CancelOrder{{InstID: instId}}
+//	resp, err = b.client.Rest.Trade.CandleOrder(req)
+//	return
+//}
+
+func (b *Broker) RetreatOrderWithInstrument(client *api.Client, instIds ...string) error {
+	b.GetLogger().Println("RetreatOrderWithInstrument:", instIds)
+	req := []trade.CancelOrder{}
+	var res responses.OrderList
+	var err error
+
+	if client == nil {
+		client = b.client
+	}
+	if client == nil {
+		b.GetLogger().Println(" client is nil ")
+		return nil
+	}
+
+	for _, instId := range instIds {
+		if res, err = client.Rest.Trade.GetOrderList(trade.OrderList{InstID: instId}); err != nil {
+			b.GetLogger().Println("GetOrderList Error:", err.Error())
+		}
+		for _, order := range res.Orders {
+			req = append(req, trade.CancelOrder{InstID: order.InstID, OrdID: order.OrdID, ClOrdID: order.ClOrdID})
+		}
+		if len(req) != 0 {
+			if _, err = client.Rest.Trade.CandleOrder(req); err != nil {
+				b.GetLogger().Println("RetreatOrderWithInstrument Request Failed. ", err.Error())
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (b *Broker) RetreatOrder(instId string, clOrdId string) (resp responses.PlaceOrder, err error) {
 	req := []trade.CancelOrder{{InstID: instId, ClOrdID: clOrdId}}
 	resp, err = b.client.Rest.Trade.CandleOrder(req)
 	return
+}
+
+// RetreatAllOrder 撤除所有委托
+func (b *Broker) RetreatAllOrder(client *api.Client) error {
+	b.GetLogger().Println("RetreatAllOrder..")
+	req := []trade.CancelOrder{}
+	var res responses.OrderList
+	var err error
+	if res, err = client.Rest.Trade.GetOrderList(trade.OrderList{}); err != nil {
+		b.GetLogger().Fatalln("GetOrderList Error:", err.Error())
+	}
+	for _, order := range res.Orders {
+		instId := order.InstID
+		if _, ok := b.underlyings[instId]; ok {
+			req = append(req, trade.CancelOrder{InstID: instId, OrdID: order.OrdID, ClOrdID: order.ClOrdID})
+		}
+	}
+	if len(req) != 0 {
+		b.GetLogger().Println(req)
+		if _, err := client.Rest.Trade.CandleOrder(req); err != nil {
+			b.GetLogger().Fatalln("RetreatAllOrder Request Failed. ", err.Error())
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *Broker) SendOrder(order *trade.PlaceOrder) (err error) {
@@ -437,6 +534,10 @@ func (b *Broker) SendOrder(order *trade.PlaceOrder) (err error) {
 	b.mtx.Lock()
 	err = b.client.Ws.Trade.PlaceOrder(*order)
 	b.mtx.Unlock()
+	if err != nil {
+		b.GetLogger().Println("Ws send failed, try to rest ..")
+		_, err = b.client.Rest.Trade.PlaceOrder([]trade.PlaceOrder{*order})
+	}
 	//reqOrder := requests_trade.PlaceOrder{
 	//	ID:      strconv.FormatInt(time.Now().UnixMilli(), 10),
 	//	InstID:  instId,
@@ -484,14 +585,16 @@ func (b *Broker) InitInstruments(client *api.Client) error {
 			}
 		}
 	}
+	b.GetLogger().Println("Ready Instruments:", b.underlyings)
 	return err
 }
 
-func (b *Broker) GetOrderDetail(instId string, clOrdId string) *responses.OrderList {
+func (b *Broker) GetOrderDetail(instId string, clOrdId string) (res responses.OrderList, err error) {
 	req := trade.OrderDetails{InstID: instId, ClOrdID: clOrdId}
-	if res, err := b.client.Rest.Trade.GetOrderDetail(req); err == nil {
-		return &res
+
+	if res, err = b.client.Rest.Trade.GetOrderDetail(req); err == nil {
+		return
 	}
-	return nil
+	return
 
 }

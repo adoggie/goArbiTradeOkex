@@ -2,8 +2,8 @@
   "message": "create_order",
   "data": {
     "id": "xxx",
-    "spot": "SOL-USDT,buy",
-    "swap": "SOL-USDT-SWAP,sell",
+    "spot": "SOL-USDT,sell",
+    "swap": "SOL-USDT-SWAP,buy",
     "amount": 30
   }
 }

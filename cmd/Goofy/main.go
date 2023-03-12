@@ -9,16 +9,16 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-
 	//thislog "logging"
 	"os"
 	"time"
 )
 
 type LoggerVars struct {
-	File string `json:"file,omitempty"`
-	Mx   string `json:"mx,omitempty"`
-	Name string `json:"name,omitempty"`
+	File  string `json:"file,omitempty"`
+	Mx    string `json:"mx,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Level string `json:"level"`
 }
 
 type GlobalConfigVars struct {
@@ -32,25 +32,22 @@ type GlobalConfigVars struct {
 }
 
 var (
-	logger *log.Logger
+	//logger *log.Logger
+	logger *utils.Logger
 )
 
-func initLogger(vars LoggerVars) *log.Logger {
+func initLogger(vars LoggerVars) *utils.Logger {
 
 	fn := vars.File
 	format := "2006-01-02"
 	t := time.Now().UTC().Format(format)
 	fn = fmt.Sprintf("%s_%s.log", fn, t)
-
 	writers := []io.Writer{os.Stdout}
-
 	fp, _ := os.OpenFile(fn, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	writers = append(writers, fp)
 
-	//zh := thislog.NewZmqHandler(vars.Mx, vars.Name)
-	//writers = append(writers, zh)
+	logger = utils.NewLogger(vars.Name, io.MultiWriter(writers...), utils.DEBUG, log.LstdFlags|log.Lshortfile).SetLevelName(vars.Level)
 
-	logger = log.New(io.MultiWriter(writers...), vars.Name, log.LstdFlags|log.Lshortfile)
 	return logger
 }
 
@@ -85,8 +82,8 @@ func main() {
 	ctx := context.Background()
 	commbase := &core.CommBase{}
 	broker := &core.Broker{CommBase: commbase}
-	broker.Init(&globalvars.Broker)
 	commbase.SetBroker(broker).SetLogger(logger)
+	broker.Init(&globalvars.Broker)
 
 	riskMgr := &core.RiskManager{CommBase: commbase}
 	riskMgr.Init(&globalvars.RiskManager)
@@ -103,7 +100,7 @@ func main() {
 	controller := core.Controller{CommBase: commbase}
 	controller.Init(&globalvars.Controller)
 	controller.AddStrategy(strategy).SetRiskManager(riskMgr).SetOrderManager(orderMgr)
-
+	commbase.SetController(&controller)
 	controller.Start(ctx)
 
 }

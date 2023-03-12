@@ -4,11 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gookit/goutil/mathutil"
+	"github.com/gorilla/websocket"
+	"github.com/pebbe/zmq4"
+
 	//"github.com/pebbe/zmq4"
 	"io"
 	"net/http"
 	"reflect"
 	"strings"
+)
+
+const (
+	CmCreateOrder = "create_order"
+	CmTaskEnd     = "task_end"
 )
 
 /*
@@ -40,7 +48,9 @@ func (a *Argument) UnmarshalJSON(buf []byte) error {
 }
 
 type ControllerConfigVars struct {
-	MxCmd      string `json:"mxCmd"`
+	Id         string `json:"id"`
+	MxCmdSub   string `json:"mx_cmd_sub"`
+	MxCmdPub   string `json:"mx_cmd_pub"`
 	HttpServer string `json:"httpserver"`
 }
 
@@ -52,8 +62,10 @@ type Controller struct {
 	orderMgr   *OrderManager
 	ctx        context.Context
 	config     *ControllerConfigVars
+	upgrader   websocket.Upgrader
 
-	//commandSock *zmq4.Socket
+	sockSub *zmq4.Socket
+	sockPub *zmq4.Socket
 	//commandSock protocol.Socket
 }
 
@@ -61,8 +73,33 @@ func (c *Controller) Init(config *ControllerConfigVars) {
 	c.config = config
 	c.strategies = make(map[string]*Strategy)
 	c.chEvent = make(chan any)
-	//c.initMx()
+	c.initMx()
 	c.iniHttpServer()
+}
+
+func (c *Controller) httpWs(w http.ResponseWriter, r *http.Request) {
+	conn, err := c.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		c.GetLogger().Fatalln("httpWs init error:", err.Error())
+	}
+	go func() {
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			default:
+				var cmd CommandMessage
+				if err := conn.ReadJSON(&cmd); err != nil {
+					c.GetLogger().Println("Command Message Corrupt:", err.Error())
+					continue
+				}
+				c.execCommand(&cmd)
+			}
+
+		}
+	}()
+
+	go func() {}()
 }
 
 func (c *Controller) httpCmdProcess(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +129,7 @@ func (c *Controller) httpCmdProcess(w http.ResponseWriter, r *http.Request) {
 
 func (c *Controller) iniHttpServer() {
 	http.HandleFunc("/cmd", c.httpCmdProcess)
+	http.HandleFunc("/ws", c.httpWs)
 	go func() {
 		if err := http.ListenAndServe(c.config.HttpServer, nil); err != nil {
 			c.GetLogger().Fatalln(err.Error())
@@ -101,15 +139,21 @@ func (c *Controller) iniHttpServer() {
 	c.GetLogger().Println("http server start on :", c.config.HttpServer)
 }
 
-//func (c *Controller) initMx() {
-//	c.commandSock, _ = zmq4.NewSocket(zmq4.SUB)
-//	if err := c.commandSock.SetSubscribe(""); err != nil {
-//		c.GetLogger().Fatalln(err.Error())
-//	}
-//	if err := c.commandSock.Bind(c.config.MxCmd); err != nil {
-//		c.GetLogger().Fatalln("bind ipc :", c.config.MxCmd, "error:", err.Error())
-//	}
-//}
+func (c *Controller) initMx() {
+	c.GetLogger().Println("initMx ..")
+	c.sockSub, _ = zmq4.NewSocket(zmq4.SUB)
+	if err := c.sockSub.SetSubscribe(""); err != nil {
+		c.GetLogger().Fatalln(err.Error())
+	}
+	if err := c.sockSub.Connect(c.config.MxCmdSub); err != nil {
+		c.GetLogger().Fatalln("connect ", c.config.MxCmdSub, " error:", err.Error())
+	}
+	c.sockPub, _ = zmq4.NewSocket(zmq4.PUB)
+	if err := c.sockPub.Connect(c.config.MxCmdPub); err != nil {
+		c.GetLogger().Fatalln("connect ", c.config.MxCmdPub, " error:", err.Error())
+	}
+
+}
 
 func (c *Controller) SetOrderManager(ordermgr *OrderManager) *Controller {
 	c.orderMgr = ordermgr
@@ -125,30 +169,8 @@ func (c Controller) GetChEvent() chan interface{} {
 	return c.chEvent
 }
 
-//
-//func (c *Controller) CommandInteract() {
-//	for {
-//		if data, err := c.commandSock.Recv(0); err != nil {
-//			//if data, err := c.commandSock.Recv(); err != nil {
-//			c.GetLogger().Println("CommandInteract Error:", err.Error())
-//			break
-//		} else {
-//			var msg CommandMessage
-//			var err error
-//			c.GetLogger().Println("Got CmdMsg:", data)
-//			err = json.Unmarshal([]byte(data), &msg)
-//			if err != nil {
-//				c.GetLogger().Println("json decode error:", err.Error())
-//				continue
-//			}
-//			c.execCommand(&msg)
-//
-//		}
-//	}
-//}
-
 func (c *Controller) execCommand(message *CommandMessage) {
-	if message.Message == "create_order" {
+	if message.Message == CmCreateOrder {
 		spot, ok := message.Data.Get("spot")
 		if !ok {
 			return
@@ -202,9 +224,47 @@ func (c *Controller) execCommand(message *CommandMessage) {
 	}
 }
 
+func (c *Controller) runMx() {
+	c.GetLogger().Println("runMx .. ")
+	go func() {
+		for {
+			if data, err := c.sockSub.Recv(0); err != nil {
+				c.GetLogger().Println("socket recv error:", err.Error())
+				break
+			} else {
+				var msg CommandMessage
+				var err error
+				err = json.Unmarshal([]byte(data), &msg)
+				if err != nil {
+					c.GetLogger().Println("json decode error:", err.Error(), " data:", data)
+					continue
+				}
+				c.execCommand(&msg)
+			}
+		}
+		c.GetLogger().Println("runMx exit..")
+	}()
+	<-c.ctx.Done()
+	_ = c.sockSub.Close()
+	_ = c.sockPub.Close()
+}
+
+func (c *Controller) TaskReport(message any) {
+	var err error
+	var data []byte
+	data, err = json.Marshal(message)
+	if err != nil {
+		c.GetLogger().Println("TaskReport Error:", err.Error(), " data:", message)
+	}
+	c.GetLogger().Println(string(data))
+	_, _ = c.sockPub.SendBytes(data, 0)
+}
+
 func (c *Controller) Start(ctx context.Context) {
 	//c.ctx = context.Background()
+	c.GetLogger().Info("Controller Start...")
 	c.ctx = ctx
+	go c.runMx()
 	//go c.CommandInteract()
 	//c.CommandInteract()
 
